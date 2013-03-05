@@ -1,6 +1,7 @@
 package gnomoria
 
 import (
+	"math"
 	"math/rand"
 )
 
@@ -21,18 +22,20 @@ const (
 type Tiles [NUM_TILES]Tile
 
 type Layout struct {
-	tiles   Tiles
-	fitness float64
-	copied  bool
+	tiles     Tiles
+	fitness   float64
+	copied    bool
+	locations map[string][]int
 }
 
 func (layout *Layout) Evaluate() {
-	-(penalizeDuplicateWorkshops(layout) +
-		penalizeMissingWorkshops(layout) +
-		penalizeStockpiles(layout) +
-		penalizeGoods(layout) +
-		penalizeHaulingDistance(layout) +
-		penalizeMissingStockpiles(layout))
+	findLocations(layout)
+	layout.fitness = 0
+	layout.fitness -= penalizeDuplicateWorkshops(layout)
+	layout.fitness -= penalizeMissingWorkshops(layout)
+	layout.fitness -= penalizeStockpiles(layout)
+	layout.fitness -= penalizeGoods(layout)
+	layout.fitness -= penalizeHaulingDistance(layout)
 }
 
 func (layout *Layout) Fitness() float64 {
@@ -90,6 +93,7 @@ func penalizeDuplicateWorkshops(layout *Layout) (penalty float64) {
 			}
 		}
 	}
+	return
 }
 
 func penalizeMissingWorkshops(layout *Layout) float64 {
@@ -98,7 +102,7 @@ func penalizeMissingWorkshops(layout *Layout) float64 {
 		tile := &layout.tiles[i]
 		workshops[tile.workshop] = true
 	}
-	return (NumWorkshops() - len(workshops)) * MISSING_WORKSHOP_PENALTY
+	return float64((NumWorkshops() - len(workshops)) * MISSING_WORKSHOP_PENALTY)
 }
 
 func penalizeStockpiles(layout *Layout) float64 {
@@ -108,7 +112,7 @@ func penalizeStockpiles(layout *Layout) float64 {
 			count++
 		}
 	}
-	return count * STOCKPILE_PENALTY
+	return float64(count * STOCKPILE_PENALTY)
 }
 
 func penalizeGoods(layout *Layout) float64 {
@@ -124,20 +128,40 @@ func penalizeGoods(layout *Layout) float64 {
 			total_count += (count - 1)
 		}
 	}
-	return total_count
+	return float64(total_count * GOODS_PENALTY)
 }
 
-func penalizeHaulingDistance(layout *Layout) float64 {
-}
-
-func penalizeMissingStockpiles(layout *Layout) float64 {
-	goods := map[string]bool{}
+func penalizeHaulingDistance(layout *Layout) (penalty float64) {
 	for i := 0; i < NUM_TILES; i++ {
-		for good, b := range layout.tiles[i].goods {
-			if b {
-				goods[good] = true
+		if layout.tiles[i].kind == WORKSHOP {
+			y, x := i/GRID_SIZE, i%GRID_SIZE
+			for _, good := range WorkshopGoods(layout.tiles[i].workshop) {
+				penalty += distanceToHaul(x, y, layout.locations[good])
 			}
 		}
 	}
-	return (NumGoods() - len(goods)) * MISSING_STOCKPILE_PENALTY
+	return
+}
+
+func findLocations(layout *Layout) {
+	layout.locations = make(map[string][]int)
+	for i := 0; i < NUM_TILES; i++ {
+		for good, b := range layout.tiles[i].goods {
+			if b {
+				layout.locations[good] = append(layout.locations[good], i)
+			}
+		}
+	}
+}
+
+func distanceToHaul(x1, y1 int, locations []int) float64 {
+	if locations == nil {
+		return MISSING_STOCKPILE_PENALTY
+	}
+	dist := float64(0)
+	for _, i := range locations {
+		y2, x2 := i/GRID_SIZE, i%GRID_SIZE
+		dist += math.Abs(float64(x2-x1)) + math.Abs(float64(y2-y1))
+	}
+	return (dist / float64(len(locations))) * HAULING_DISTANCE_PENALTY
 }
